@@ -1,9 +1,8 @@
-Python
 from datamodel import OrderDepth, UserId, TradingState, Order
 from typing import List, Dict
 import json
-import numpy as np
 
+# Constants
 PEPPER_SYMBOL = 'INTARIAN_PEPPER_ROOT'
 POS_LIMIT = 80
 
@@ -14,46 +13,71 @@ class Trader:
 
     def run(self, state: TradingState):
         result = {}
+        
+        # 1. Persistent Data Recovery
         if state.traderData:
-            self.history = json.loads(state.traderData)
+            try:
+                self.history = json.loads(state.traderData)
+            except:
+                self.history = []
         
         if PEPPER_SYMBOL not in state.order_depths:
             return result, 0, json.dumps(self.history)
 
-        order_depth = state.order_depths[PEPPER_SYMBOL]
+        order_depth: OrderDepth = state.order_depths[PEPPER_SYMBOL]
         current_pos = state.position.get(PEPPER_SYMBOL, 0)
-        best_bid = max(order_depth.buy_orders.keys())
-        best_ask = min(order_depth.sell_orders.keys())
-        mid_price = (best_bid + best_ask) / 2
         
+        # 2. Price Discovery
+        best_bid = max(order_depth.buy_orders.keys()) if order_depth.buy_orders else None
+        best_ask = min(order_depth.sell_orders.keys()) if order_depth.sell_orders else None
+        
+        if not best_bid or not best_ask:
+            return result, 0, json.dumps(self.history)
+            
+        mid_price = (best_bid + best_ask) / 2
         self.history.append(mid_price)
         if len(self.history) > self.window:
             self.history.pop(0)
 
-        orders = []
-        if len(self.history) == self.window:
-            # Calculate Slope (m) using Linear Regression
-            x = np.arange(len(self.history))
-            y = np.array(self.history)
-            m, b = np.polyfit(x, y, 1)
-            predicted_now = m * (self.window - 1) + b
+        orders: List[Order] = []
+        
+        # 3. Pure Python Linear Regression
+        n = len(self.history)
+        if n >= 5: # Start trading as soon as we have a small trend
+            x = list(range(n))
+            y = self.history
+            
+            sum_x = sum(x)
+            sum_y = sum(y)
+            sum_xx = sum(xi*xi for xi in x)
+            sum_xy = sum(xi*yi for xi, yi in zip(x, y))
+            
+            # Formula for Slope (m) and Intercept (b)
+            denominator = (n * sum_xx - sum_x**2)
+            if denominator != 0:
+                m = (n * sum_xy - sum_x * sum_y) / denominator
+                b = (sum_y - m * sum_x) / n
+                predicted_now = m * (n - 1) + b
 
-            # THE SOVEREIGN LOGIC
-            if m > 0:
-                # Upward Trend: Maintain at least Core 40
-                if mid_price < predicted_now:
-                    target = 80 # Buy the 'dip' below the slope
+                # 4. SOVEREIGN SLOPE LOGIC
+                if m > 0:
+                    # Positive Slope: Bull Market Mode
+                    if mid_price < predicted_now:
+                        target = 80 # Buy the dip below the trajectory
+                    else:
+                        target = 40 # Maintain the Core 40 'Hold'
                 else:
-                    target = 40 # Sell the 'rip' above the slope
-            else:
-                # BEAR SAFEGUARD: Slope is negative, exit to cash
-                target = 0
+                    # Negative Slope: Bear Safeguard
+                    # If the slope dips below 0, we exit to protect capital
+                    target = 0
 
-            # Execution Scrutiny
-            if current_pos < target:
-                orders.append(Order(PEPPER_SYMBOL, best_ask, target - current_pos))
-            elif current_pos > target:
-                orders.append(Order(PEPPER_SYMBOL, best_bid, target - current_pos))
+                # Execution with Scrutiny
+                if current_pos < target:
+                    qty = target - current_pos
+                    orders.append(Order(PEPPER_SYMBOL, best_ask, qty))
+                elif current_pos > target:
+                    qty = current_pos - target
+                    orders.append(Order(PEPPER_SYMBOL, best_bid, -qty))
 
         result[PEPPER_SYMBOL] = orders
         return result, 0, json.dumps(self.history)
