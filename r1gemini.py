@@ -1,4 +1,3 @@
-Python
 from datamodel import OrderDepth, TradingState, Order
 import collections
 
