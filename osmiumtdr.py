@@ -61,39 +61,44 @@ class ProductTrader:
 
 class OsmiumTrader(ProductTrader):
     def get_orders(self):
-        # We define a 'Fair Value' based on the mid-point of the walls
-        if self.wall_mid is None:
+        if not self.buy_orders or not self.sell_orders:
             return self.orders
 
-        fair_value = self.wall_mid
+        # 1. VWAP Fair Value
+        best_bid, bid_vol = list(self.buy_orders.items())[0]
+        best_ask, ask_vol = list(self.sell_orders.items())[0]
+        fv = (best_bid * ask_vol + best_ask * bid_vol) / (bid_vol + ask_vol)
 
-        # 1. MARKET TAKING with 'EDGE' (The Snipe)
-        # We only 'take' if the profit is at least 2 ticks to avoid noise
-        edge = 2
-        for sp, sv in self.mkt_sell_orders.items():
-            if sp <= fair_value - edge:
-                self.bid(sp, sv)
-        
-        for bp, bv in self.mkt_buy_orders.items():
-            if bp >= fair_value + edge:
-                self.ask(bp, bv)
+        # 2. MARKET TAKING (The Sniper)
+        # Snatch immediate mispriced liquidity
+        for price, vol in self.sell_orders.items():
+            if price <= fv - 1: # Tightened from 2 to 1 for more aggression
+                self.bid(price, vol)
+        for price, vol in self.buy_orders.items():
+            if price >= fv + 1: # Tightened from 2 to 1 for more aggression
+                self.ask(price, vol)
 
-        # 2. SOPHISTICATED MARKET MAKING (The Skew)
-        # We shift our target prices based on current inventory
-        # If position is +40, we want to sell more than buy, so we lower both prices
-        inventory_skew = -int(self.initial_position / 10) # Adjusts by 1 tick for every 10 units held
-        
-        # Base strategy: place orders 1-2 ticks around the skewed fair value
-        bid_price = int(math.floor(fair_value + inventory_skew - 1))
-        ask_price = int(math.ceil(fair_value + inventory_skew + 1))
+        # 3. AGGRESSIVE PASSIVE PENNYING
+        # We target 1 tick above/below best market prices
+        bid_price = best_bid + 1
+        ask_price = best_ask - 1
 
-        # Ensure we always have at least a 1-tick spread
+        # Inventory management: If we are near the 80 limit, we back off
+        # Long position -> lower our bid price to buy less aggressively
+        # Short position -> raise our ask price to sell less aggressively
+        if self.initial_position > 40:
+            bid_price = best_bid # Stop jumping the queue to buy
+        elif self.initial_position < -40:
+            ask_price = best_ask # Stop jumping the queue to sell
+
+        # Final Scrutiny: Ensure we don't cross our own spread
         if bid_price >= ask_price:
-            bid_price = ask_price - 1
+            bid_price = int(math.floor(fv - 1))
+            ask_price = int(math.ceil(fv + 1))
 
-        # Post orders to the book
-        self.bid(bid_price, self.max_allowed_buy_volume)
-        self.ask(ask_price, self.max_allowed_sell_volume)
+        # Deploy the full 80-item capacity into the spread
+        self.bid(bid_price, self.max_buy)
+        self.ask(ask_price, self.max_sell)
 
         return self.orders
 
