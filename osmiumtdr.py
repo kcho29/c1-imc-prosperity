@@ -61,48 +61,39 @@ class ProductTrader:
 
 class OsmiumTrader(ProductTrader):
     def get_orders(self):
-        if self.wall_mid is not None:
-            # 1. MARKET TAKING (Immediate execution on mispriced depth)
-            for sp, sv in self.mkt_sell_orders.items():
-                if sp <= self.wall_mid - 2:
-                    self.bid(sp, sv)
-                elif sp <= self.wall_mid and self.initial_position < 0:
-                    volume = min(sv, abs(self.initial_position))
-                    self.bid(sp, volume)
+        # We define a 'Fair Value' based on the mid-point of the walls
+        if self.wall_mid is None:
+            return self.orders
 
-            for bp, bv in self.mkt_buy_orders.items():
-                if bp >= self.wall_mid + 2:
-                    self.ask(bp, bv)
-                elif bp >= self.wall_mid and self.initial_position > 0:
-                    volume = min(bv, self.initial_position)
-                    self.ask(bp, volume)
+        fair_value = self.wall_mid
 
-            # 2. MARKET MAKING (Passive order placement with overbidding logic)
-            bid_price = int(self.bid_wall + 1)
-            ask_price = int(self.ask_wall - 1)
+        # 1. MARKET TAKING with 'EDGE' (The Snipe)
+        # We only 'take' if the profit is at least 2 ticks to avoid noise
+        edge = 2
+        for sp, sv in self.mkt_sell_orders.items():
+            if sp <= fair_value - edge:
+                self.bid(sp, sv)
+        
+        for bp, bv in self.mkt_buy_orders.items():
+            if bp >= fair_value + edge:
+                self.ask(bp, bv)
 
-            # Overbidding: Find the best bid still under the mid-point to capture spread
-            for bp, bv in self.mkt_buy_orders.items():
-                overbidding_price = bp + 1
-                if bv > 1 and overbidding_price < self.wall_mid:
-                    bid_price = max(bid_price, overbidding_price)
-                    break
-                elif bp < self.wall_mid:
-                    bid_price = max(bid_price, bp)
-                    break
+        # 2. SOPHISTICATED MARKET MAKING (The Skew)
+        # We shift our target prices based on current inventory
+        # If position is +40, we want to sell more than buy, so we lower both prices
+        inventory_skew = -int(self.initial_position / 10) # Adjusts by 1 tick for every 10 units held
+        
+        # Base strategy: place orders 1-2 ticks around the skewed fair value
+        bid_price = int(math.floor(fair_value + inventory_skew - 1))
+        ask_price = int(math.ceil(fair_value + inventory_skew + 1))
 
-            # Underbidding: Find the best ask still over the mid-point
-            for sp, sv in self.mkt_sell_orders.items():
-                underbidding_price = sp - 1
-                if sv > 1 and underbidding_price > self.wall_mid:
-                    ask_price = min(ask_price, underbidding_price)
-                    break
-                elif sp > self.wall_mid:
-                    ask_price = min(ask_price, sp)
-                    break
+        # Ensure we always have at least a 1-tick spread
+        if bid_price >= ask_price:
+            bid_price = ask_price - 1
 
-            self.bid(bid_price, self.max_allowed_buy_volume)
-            self.ask(ask_price, self.max_allowed_sell_volume)
+        # Post orders to the book
+        self.bid(bid_price, self.max_allowed_buy_volume)
+        self.ask(ask_price, self.max_allowed_sell_volume)
 
         return self.orders
 
