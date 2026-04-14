@@ -4,66 +4,67 @@ import json
 class Trader:
     def run(self, state: TradingState):
         result = {}
-        
-        # --- Memory Management ---
-        # We decode the EMA from the previous tick's traderData
         ema_pepper = None
+        
+        # Decode memory
         if state.traderData:
-            ema_pepper = float(state.traderData)
+            try: ema_pepper = float(state.traderData)
+            except: ema_pepper = None
             
-        ema_alpha = 0.2 
+        ema_alpha = 0.3 # Faster reaction to catch the trend
 
         for product in state.order_depths:
             order_depth: OrderDepth = state.order_depths[product]
             orders: list[Order] = []
             current_pos = state.position.get(product, 0)
-            limit = 80 # Updated to Round 1 Limits
+            limit = 80 
             
-            # Basic Price Scrutiny
-            sell_prices = sorted(order_depth.sell_orders.keys())
-            buy_prices = sorted(order_depth.buy_orders.keys(), reverse=True)
+            # Get current market prices
+            buy_orders = sorted(order_depth.buy_orders.items(), reverse=True)
+            sell_orders = sorted(order_depth.sell_orders.items())
             
-            if not sell_prices or not buy_prices:
-                continue
-                
-            best_ask = sell_prices[0]
-            best_bid = buy_prices[0]
-            mid_price = (best_ask + best_bid) / 2
+            if not buy_orders or not sell_orders: continue
+            
+            best_bid, bit_vol = buy_orders[0]
+            best_ask, ask_vol = sell_orders[0]
+            mid_price = (best_bid + best_ask) / 2
 
-            # --- OSMIUM: Mean Reversion (The Anchor) ---
+            # --- OSMIUM: Active Market Making ---
             if product == "ASH_COATED_OSMIUM":
-                fair_value = 10000 
+                # Strategy: Always try to be 1 tick better than the best bot
+                # but stay within the "Gravity" of 10k
                 
-                # Market Making: Overbid/Underbid to capture the 10k gravity
-                # We aim to buy at 9999 and sell at 10001
-                bid_price = 9999
-                ask_price = 10001
-                
+                # If we have room to buy, overbid the current best buyer
                 if current_pos < limit:
-                    orders.append(Order(product, bid_price, limit - current_pos))
-                if current_pos > -limit:
-                    orders.append(Order(product, ask_price, -limit - current_pos))
-
-            # --- PEPPER_ROOT: Trend Following (The Wave) ---
-            elif product == "INTARIAN_PEPPER_ROOT":
-                if ema_pepper is None:
-                    ema_pepper = mid_price
-                else:
-                    ema_pepper = (mid_price * ema_alpha) + (ema_pepper * (1 - ema_alpha))
+                    # We bid 1 tick higher than the best bid, but not above 10,001
+                    bid_price = min(best_bid + 1, 10001)
+                    orders.append(Order(product, int(bid_price), limit - current_pos))
                 
-                # If price is trending up, we want to be +80
-                if mid_price > ema_pepper + 1:
+                # If we have room to sell, undercut the current best seller
+                if current_pos > -limit:
+                    # We ask 1 tick lower than the best ask, but not below 9,999
+                    ask_price = max(best_ask - 1, 9999)
+                    orders.append(Order(product, int(ask_price), -limit - current_pos))
+
+            # --- PEPPER_ROOT: Aggressive Trend Following ---
+            elif product == "INTARIAN_PEPPER_ROOT":
+                if ema_pepper is None: ema_pepper = mid_price
+                ema_pepper = (mid_price * ema_alpha) + (ema_pepper * (1 - ema_alpha))
+                
+                # If price is moving up AT ALL, buy immediately (Market Take)
+                if mid_price > ema_pepper:
                     buy_vol = limit - current_pos
                     if buy_vol > 0:
+                        # We hit the 'best_ask' to guarantee the trade happens NOW
                         orders.append(Order(product, best_ask, buy_vol))
                 
-                # If price is trending down, we want to be -80
-                elif mid_price < ema_pepper - 1:
+                # If price is moving down, sell immediately
+                elif mid_price < ema_pepper:
                     sell_vol = -limit - current_pos
                     if sell_vol < 0:
                         orders.append(Order(product, best_bid, sell_vol))
 
-        # --- Save Memory for Next Tick ---
+            result[product] = orders
+
         traderData = str(ema_pepper) if ema_pepper else ""
-        
-        return result, 0, traderData # Correct return format
+        return result, 0, traderData 
