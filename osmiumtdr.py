@@ -61,34 +61,48 @@ class ProductTrader:
 
 class OsmiumTrader(ProductTrader):
     def get_orders(self):
-        if not self.mkt_buy_orders or not self.mkt_sell_orders:
-            return self.orders
+        if self.wall_mid is not None:
+            # 1. MARKET TAKING (Immediate execution on mispriced depth)
+            for sp, sv in self.mkt_sell_orders.items():
+                if sp <= self.wall_mid - 2:
+                    self.bid(sp, sv)
+                elif sp <= self.wall_mid and self.initial_position < 0:
+                    volume = min(sv, abs(self.initial_position))
+                    self.bid(sp, volume)
 
-        # 1. VWAP Fair Value (Superior to simple mid-price)
-        best_bid, bid_vol = list(self.mkt_buy_orders.items())[0]
-        best_ask, ask_vol = list(self.mkt_sell_orders.items())[0]
-        fv = (best_bid * ask_vol + best_ask * bid_vol) / (bid_vol + ask_vol)
+            for bp, bv in self.mkt_buy_orders.items():
+                if bp >= self.wall_mid + 2:
+                    self.ask(bp, bv)
+                elif bp >= self.wall_mid and self.initial_position > 0:
+                    volume = min(bv, self.initial_position)
+                    self.ask(bp, volume)
 
-        # 2. Market Taking (Aggressive Sniping)
-        # We take anything better than fv to ensure no profit escapes
-        for price, vol in self.mkt_sell_orders.items():
-            if price <= fv - 1:
-                self.bid(price, vol)
-        for price, vol in self.mkt_buy_orders.items():
-            if price >= fv + 1:
-                self.ask(price, vol)
+            # 2. MARKET MAKING (Passive order placement with overbidding logic)
+            bid_price = int(self.bid_wall + 1)
+            ask_price = int(self.ask_wall - 1)
 
-        # 3. Layered Market Making with Inventory Skew
-        # Position-based skew: -1 tick for every 20 units of inventory
-        skew = -int(self.initial_position / 20)
-        
-        # Layer 1: Aggressive Pennying (The Front Line)
-        self.bid(best_bid + 1 + skew, self.max_allowed_buy_volume // 2)
-        self.ask(best_ask - 1 + skew, self.max_allowed_sell_volume // 2)
-        
-        # Layer 2: Deep Liquidity (The Safety Net)
-        self.bid(best_bid + skew, self.max_allowed_buy_volume)
-        self.ask(best_ask + skew, self.max_allowed_sell_volume)
+            # Overbidding: Find the best bid still under the mid-point to capture spread
+            for bp, bv in self.mkt_buy_orders.items():
+                overbidding_price = bp + 1
+                if bv > 1 and overbidding_price < self.wall_mid:
+                    bid_price = max(bid_price, overbidding_price)
+                    break
+                elif bp < self.wall_mid:
+                    bid_price = max(bid_price, bp)
+                    break
+
+            # Underbidding: Find the best ask still over the mid-point
+            for sp, sv in self.mkt_sell_orders.items():
+                underbidding_price = sp - 1
+                if sv > 1 and underbidding_price > self.wall_mid:
+                    ask_price = min(ask_price, underbidding_price)
+                    break
+                elif sp > self.wall_mid:
+                    ask_price = min(ask_price, sp)
+                    break
+
+            self.bid(bid_price, self.max_allowed_buy_volume)
+            self.ask(ask_price, self.max_allowed_sell_volume)
 
         return self.orders
 
