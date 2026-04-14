@@ -61,44 +61,34 @@ class ProductTrader:
 
 class OsmiumTrader(ProductTrader):
     def get_orders(self):
-        if not self.buy_orders or not self.sell_orders:
+        if not self.mkt_buy_orders or not self.mkt_sell_orders:
             return self.orders
 
-        # 1. VWAP Fair Value
-        best_bid, bid_vol = list(self.buy_orders.items())[0]
-        best_ask, ask_vol = list(self.sell_orders.items())[0]
+        # 1. VWAP Fair Value (Superior to simple mid-price)
+        best_bid, bid_vol = list(self.mkt_buy_orders.items())[0]
+        best_ask, ask_vol = list(self.mkt_sell_orders.items())[0]
         fv = (best_bid * ask_vol + best_ask * bid_vol) / (bid_vol + ask_vol)
 
-        # 2. MARKET TAKING (The Sniper)
-        # Snatch immediate mispriced liquidity
-        for price, vol in self.sell_orders.items():
-            if price <= fv - 1: # Tightened from 2 to 1 for more aggression
+        # 2. Market Taking (Aggressive Sniping)
+        # We take anything better than fv to ensure no profit escapes
+        for price, vol in self.mkt_sell_orders.items():
+            if price <= fv - 1:
                 self.bid(price, vol)
-        for price, vol in self.buy_orders.items():
-            if price >= fv + 1: # Tightened from 2 to 1 for more aggression
+        for price, vol in self.mkt_buy_orders.items():
+            if price >= fv + 1:
                 self.ask(price, vol)
 
-        # 3. AGGRESSIVE PASSIVE PENNYING
-        # We target 1 tick above/below best market prices
-        bid_price = best_bid + 1
-        ask_price = best_ask - 1
-
-        # Inventory management: If we are near the 80 limit, we back off
-        # Long position -> lower our bid price to buy less aggressively
-        # Short position -> raise our ask price to sell less aggressively
-        if self.initial_position > 40:
-            bid_price = best_bid # Stop jumping the queue to buy
-        elif self.initial_position < -40:
-            ask_price = best_ask # Stop jumping the queue to sell
-
-        # Final Scrutiny: Ensure we don't cross our own spread
-        if bid_price >= ask_price:
-            bid_price = int(math.floor(fv - 1))
-            ask_price = int(math.ceil(fv + 1))
-
-        # Deploy the full 80-item capacity into the spread
-        self.bid(bid_price, self.max_buy)
-        self.ask(ask_price, self.max_sell)
+        # 3. Layered Market Making with Inventory Skew
+        # Position-based skew: -1 tick for every 20 units of inventory
+        skew = -int(self.initial_position / 20)
+        
+        # Layer 1: Aggressive Pennying (The Front Line)
+        self.bid(best_bid + 1 + skew, self.max_allowed_buy_volume // 2)
+        self.ask(best_ask - 1 + skew, self.max_allowed_sell_volume // 2)
+        
+        # Layer 2: Deep Liquidity (The Safety Net)
+        self.bid(best_bid + skew, self.max_allowed_buy_volume)
+        self.ask(best_ask + skew, self.max_allowed_sell_volume)
 
         return self.orders
 
