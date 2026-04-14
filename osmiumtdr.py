@@ -77,9 +77,16 @@ class OsmiumTrader(ProductTrader):
                     volume = min(bv, self.initial_position)
                     self.ask(bp, volume)
 
-            # 2. MARKET MAKING (Passive order placement with overbidding logic)
-            bid_price = int(self.bid_wall + 1)
-            ask_price = int(self.ask_wall - 1)
+            # 2. MARKET MAKING (High Aggression Pennying)
+            # We penny the best current market prices to ensure we are first in line
+            if self.best_bid is not None and self.best_ask is not None:
+                # Bid exactly 1 tick above the current best bid to jump the queue
+                bid_price = min(self.best_bid + 1, int(math.floor(self.wall_mid - 1)))
+                # Ask exactly 1 tick below the current best ask
+                ask_price = max(self.best_ask - 1, int(math.ceil(self.wall_mid + 1)))
+
+                self.bid(bid_price, self.max_allowed_buy_volume)
+                self.ask(ask_price, self.max_allowed_sell_volume)
 
             # Overbidding: Find the best bid still under the mid-point to capture spread
             for bp, bv in self.mkt_buy_orders.items():
