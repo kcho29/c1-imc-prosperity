@@ -5,7 +5,7 @@ import math
 
 # Constants defined for the Osmium-specific environment
 OSMIUM_SYMBOL = 'ASH_COATED_OSMIUM'
-POS_LIMIT = 20
+POS_LIMIT = 80
 
 class ProductTrader:
     def __init__(self, name, state, product_group=None):
