@@ -7,11 +7,21 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
 
 
 def _find_round_dir(round_num):
-    """Locate the data directory for a given round number."""
-    round_dir = os.path.join(DATA_DIR, f'round{round_num}')
-    if not os.path.isdir(round_dir):
-        raise FileNotFoundError(f"No data directory found at {round_dir}")
-    return round_dir
+    """Locate the data directory for a given round number (case-insensitive)."""
+    target = f'round{round_num}'
+    for entry in os.listdir(DATA_DIR):
+        if entry.lower() == target.lower() and os.path.isdir(os.path.join(DATA_DIR, entry)):
+            return os.path.join(DATA_DIR, entry)
+    raise FileNotFoundError(f"No data directory for round {round_num} in {DATA_DIR}")
+
+
+def _find_file(round_dir, prefix, day):
+    """Find a CSV matching prefix and day, handling varying round numbers in filenames."""
+    suffix = f'day_{day}.csv'
+    for fname in os.listdir(round_dir):
+        if fname.startswith(prefix) and fname.endswith(suffix):
+            return fname
+    raise FileNotFoundError(f"No {prefix} file for day {day} in {round_dir}")
 
 
 def load_prices(round_num, day):
@@ -25,8 +35,7 @@ def load_prices(round_num, day):
         List of dicts with keys from the CSV header.
     """
     round_dir = _find_round_dir(round_num)
-    # Match the naming convention: prices_round_0_day_-1.csv
-    filename = f'prices_round_0_day_{day}.csv'
+    filename = _find_file(round_dir, 'prices', day)
     path = os.path.join(round_dir, filename)
     with open(path) as f:
         return list(csv.DictReader(f, delimiter=';'))
@@ -43,7 +52,7 @@ def load_trades(round_num, day):
         List of dicts with keys from the CSV header.
     """
     round_dir = _find_round_dir(round_num)
-    filename = f'trades_round_0_day_{day}.csv'
+    filename = _find_file(round_dir, 'trades', day)
     path = os.path.join(round_dir, filename)
     with open(path) as f:
         return list(csv.DictReader(f, delimiter=';'))

@@ -10,10 +10,13 @@
 ├── shared/                  # Shared utilities (everyone can use)
 │   ├── utils.py             # Common helpers (mid_price, EMA, SMA, etc.)
 │   ├── data_loader.py       # Load competition CSVs
-│   ├── backtest.py          # Backtesting engine
+│   ├── backtest.py          # Trade-flow backtester (fast, for parameter sweeps)
+│   ├── run_backtest.py      # Full-exchange backtester wrapper (prosperity4bt)
+│   ├── evaluate.py          # Backtest + theoretical max comparison
 │   └── log_analyzer.py      # Parse & plot submission run logs
+├── datamodel.py             # Shim so strategy files resolve `from datamodel import ...`
 ├── data/                    # Competition data (by round)
-│   └── round1/
+│   └── round0/, round1/
 ├── run_logs/                # Logs from submitted runs
 ├── submission/              # Final strategy file for each round
 ├── .gitignore
@@ -90,14 +93,42 @@ buy_cap, sell_cap = position_capacity(current_position, limit=20)
 
 ### 4. Backtest your strategy
 
-The backtest module replays historical trade flow against your quotes:
+There are two backtesters. Use the **full-exchange backtester** to test your actual submission code end-to-end, and the **trade-flow backtester** for fast parameter sweeps.
+
+#### Full-exchange backtester (prosperity4bt)
+
+Runs your actual `Trader.run()` against the simulated order book — tests both sniping and market-making:
+
+```bash
+# Run against all days in round 0
+python -m shared.run_backtest individual/kangheecho_strategy.py 0
+
+# Run a specific day
+python -m shared.run_backtest individual/kangheecho_strategy.py 0-(-1)
+
+# Conservative matching (more realistic)
+python -m shared.run_backtest individual/kangheecho_strategy.py 0 --match-trades worse
+
+# See trader print output
+python -m shared.run_backtest individual/kangheecho_strategy.py 0 --print
+```
+
+Or call `prosperity4bt` directly:
+
+```bash
+python -m prosperity4bt individual/kangheecho_strategy.py 0 --data data
+```
+
+#### Trade-flow backtester (fast, for parameter sweeps)
+
+Replays historical trades against your quoting logic — doesn't call `Trader.run()`:
 
 ```python
 from shared.backtest import backtest_emeralds_v2, backtest_tomatoes_v2
 from shared.data_loader import load_trades, load_prices
 
-trades = load_trades(1, -1)
-prices = load_prices(1, -1)
+trades = load_trades(0, -1)
+prices = load_prices(0, -1)
 
 em_result = backtest_emeralds_v2(trades)
 print(f"EMERALDS PnL: {em_result['final_pnl']:.0f}")
@@ -125,7 +156,35 @@ result = backtest_market_maker(
 )
 ```
 
-### 5. Analyze submission logs
+### 5. Evaluate strategy vs theoretical max
+
+Run your strategy through the full backtester and compare against the theoretical maximum PnL (computed via perfect-foresight DP over the trade flow):
+
+```bash
+# Evaluate on round 0
+python -m shared.evaluate individual/kangheecho_strategy.py 0
+
+# With conservative matching
+python -m shared.evaluate individual/kangheecho_strategy.py 0 --match-trades worse
+```
+
+Output shows actual PnL, theoretical max, and capture percentage per product per day:
+
+```
+                                      Day -2                            Day -1
+   Product    Actual       Max   Capture    Actual       Max   Capture
+----------------------------------------------------------------------
+  EMERALDS     2,609     7,280     35.8%     2,744     7,888     34.8%
+  TOMATOES     4,862    10,786     45.1%     4,598    10,666     43.1%
+----------------------------------------------------------------------
+     TOTAL     7,471    18,066     41.4%     7,342    18,554     39.6%
+
+Overall: 14,813 / 36,620 (40.5% of theoretical max)
+```
+
+The theoretical max uses a DP that, with perfect foresight, selectively fills against incoming trades at the optimal times. No real strategy can exceed it.
+
+### 6. Analyze submission logs
 
 After submitting on the Prosperity platform, download your run logs to `run_logs/<run_id>/`:
 
@@ -141,7 +200,7 @@ data = run['data']  # parsed JSON
 log = run['log']    # raw log output
 ```
 
-### 6. Submit
+### 7. Submit
 
 When the team picks a strategy for a round, copy it to `submission/`:
 
