@@ -2,11 +2,9 @@ from datamodel import OrderDepth, UserId, TradingState, Order
 from typing import List, Dict
 import math
 
-# Constants - Updated for 25% Market Access (+20 units)
+# Symbols from the original 175025 logic
 OSMIUM_SYMBOL = 'ASH_COATED_OSMIUM'
 PEPPER_SYMBOL = 'INTARIAN_PEPPER_ROOT'
-# If access is secured, the new limit is 100.
-POS_LIMIT = 100 
 
 class Trader:
     def run(self, state: TradingState):
@@ -17,7 +15,10 @@ class Trader:
             orders: List[Order] = []
             pos = state.position.get(product, 0)
             
-            # Using 175025's original dictionary-based discovery
+            # The 25% Volume Expansion: 80 -> 100
+            pos_limit = 100 
+            
+            # Original 175025 Dictionary Discovery
             buy_orders = order_depth.buy_orders
             sell_orders = order_depth.sell_orders
             
@@ -28,20 +29,21 @@ class Trader:
             best_ask = min(sell_orders.keys())
             mid_price = (best_bid + best_ask) / 2.0
 
-            # 175025's Core Skew Logic
+            # Core 175025 Skew Parameters
             target_pos = 0          
-            max_skew = 3.0          
+            max_skew = 3.0 if product == OSMIUM_SYMBOL else 15.0 # Preserving original skews
             edge = 1                
             
-            # Inventory error now scales to the new 100-unit limit
+            # Inventory-Skew Calculation
             pos_error = pos - target_pos
-            skew = (pos_error / POS_LIMIT) * max_skew
+            skew = (pos_error / pos_limit) * max_skew
             fv = mid_price - skew
 
-            buy_vol_allowed = POS_LIMIT - pos
-            sell_vol_allowed = -POS_LIMIT - pos
+            buy_vol_allowed = pos_limit - pos
+            sell_vol_allowed = -pos_limit - pos
 
-            # Phase A: Market Taking (175025 logic)
+            # Phase A: Market Taking
+            # OSMIUM / PEPPER Scans
             for sp, sv in sorted(sell_orders.items()):
                 if sp <= fv - 0.5 and buy_vol_allowed > 0:
                     vol = min(abs(sv), buy_vol_allowed)
@@ -54,15 +56,14 @@ class Trader:
                     orders.append(Order(product, bp, -vol))
                     sell_vol_allowed += vol
 
-            # Phase B: Market Making (175025 pennying)
+            # Phase B: Market Making (Pennying)
             my_bid = int(round(fv - edge))
             my_ask = int(round(fv + edge))
 
-            # Original Safeguards from 175025
+            # Original Safeguards
             my_bid = min(my_bid, best_bid + 1)
             my_ask = max(my_ask, best_ask - 1)
             
-            # Prevent self-cross
             if my_bid >= my_ask:
                 my_bid = int(math.floor(mid_price - 1))
                 my_ask = int(math.ceil(mid_price + 1))
