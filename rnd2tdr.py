@@ -7,12 +7,9 @@ PEPPER_SYMBOL = 'INTARIAN_PEPPER_ROOT'
 POS_LIMIT = 80
 
 class Trader:
-    # --- THE MANDATED BID METHOD ---
-    # This is the ONLY addition. It returns the bid to get 25% more market share.
-    def bid(self, state: TradingState):
+    def bid(self):
         return 5150
-    # -------------------------------
-
+    
     def run(self, state: TradingState):
         result = {}
         
@@ -53,7 +50,10 @@ class Trader:
             # 2. FAIR VALUE MATHEMATICS
             # =========================================================
             pos_error = pos - target_pos
+            # If pos=0 and target=80, skew = (-80/80) * 15 = -15
             skew = (pos_error / POS_LIMIT) * max_skew
+            
+            # Adjusted FV shifts radically to correct inventory errors
             fv = mid_price - skew
 
             buy_vol_allowed = POS_LIMIT - pos
@@ -64,6 +64,7 @@ class Trader:
             # =========================================================
             
             # Phase A: MARKET TAKING (Snipe Mispriced Liquidity)
+            # If the market is offering prices cheaper than our FV, take them instantly!
             for sp, sv in sell_orders.items():
                 if sp <= fv - 0.5 and buy_vol_allowed > 0:
                     vol = min(sv, buy_vol_allowed)
@@ -80,7 +81,7 @@ class Trader:
             my_bid = int(round(fv - edge))
             my_ask = int(round(fv + edge))
 
-            # Smart Guardrails
+            # Smart Guardrails (Never quote worse than best market passively)
             my_bid = min(my_bid, best_bid + 1)
             my_ask = max(my_ask, best_ask - 1)
 
