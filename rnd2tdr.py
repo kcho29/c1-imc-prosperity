@@ -1,8 +1,9 @@
+Python
 from datamodel import OrderDepth, UserId, TradingState, Order
 from typing import List, Dict
 import math
 
-# Symbols from the original 175025 logic
+# Constants from original 175025
 OSMIUM_SYMBOL = 'ASH_COATED_OSMIUM'
 PEPPER_SYMBOL = 'INTARIAN_PEPPER_ROOT'
 
@@ -10,15 +11,21 @@ class Trader:
     def run(self, state: TradingState):
         result = {}
         
+        # --- MARKET ACCESS BID (The "Seat on the Train") ---
+        # Per instructions: This targets the median to avoid waste.
+        # This value represents our bid for the +25% volume access.
+        bid_amount = 5150 
+        # --------------------------------------------------
+
         for product in state.order_depths:
             order_depth: OrderDepth = state.order_depths[product]
             orders: List[Order] = []
             pos = state.position.get(product, 0)
             
-            # The 25% Volume Expansion: 80 -> 100
+            # Updated Limit for Round 2 (+25% access)
             pos_limit = 100 
             
-            # Original 175025 Dictionary Discovery
+            # Exact 175025 Dictionary Discovery logic
             buy_orders = order_depth.buy_orders
             sell_orders = order_depth.sell_orders
             
@@ -29,10 +36,10 @@ class Trader:
             best_ask = min(sell_orders.keys())
             mid_price = (best_bid + best_ask) / 2.0
 
-            # Core 175025 Skew Parameters
+            # Exact 175025 Parameters
             target_pos = 0          
-            max_skew = 3.0 if product == OSMIUM_SYMBOL else 15.0 # Preserving original skews
-            edge = 1                
+            max_skew = 3.0 if product == OSMIUM_SYMBOL else 15.0
+            edge = 1 if product == OSMIUM_SYMBOL else 5 # Preserving Pepper edge
             
             # Inventory-Skew Calculation
             pos_error = pos - target_pos
@@ -42,8 +49,7 @@ class Trader:
             buy_vol_allowed = pos_limit - pos
             sell_vol_allowed = -pos_limit - pos
 
-            # Phase A: Market Taking
-            # OSMIUM / PEPPER Scans
+            # Phase A: Market Taking (Directly from 175025)
             for sp, sv in sorted(sell_orders.items()):
                 if sp <= fv - 0.5 and buy_vol_allowed > 0:
                     vol = min(abs(sv), buy_vol_allowed)
@@ -60,7 +66,7 @@ class Trader:
             my_bid = int(round(fv - edge))
             my_ask = int(round(fv + edge))
 
-            # Original Safeguards
+            # Original 175025 Safeguards
             my_bid = min(my_bid, best_bid + 1)
             my_ask = max(my_ask, best_ask - 1)
             
@@ -75,4 +81,5 @@ class Trader:
 
             result[product] = orders
 
-        return result, 0, ""
+        # The 'bid_amount' is returned as the second element per Round 2 rules.
+        return result, bid_amount, ""
